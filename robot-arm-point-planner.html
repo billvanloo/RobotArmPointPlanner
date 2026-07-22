@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robot Arm Point Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --page:      #EEF0F3;
+    --surface:   #FFFFFF;
+    --ink:       #232838;
+    --ink-soft:  #5A6178;
+    --ink-faint: #9198AC;
+    --grid:      #E4E7EE;
+    --grid-sub:  #F1F3F7;
+    --axis:      #3A4157;
+    --accent:    #4C5FD5;
+    --accent-bg: #EDEFFB;
+    --danger:    #C4453D;
+    --line:      #E0E3EA;
+    --zone:      rgba(255, 233, 140, 0.55);
+    --zone-line: #E1C86E;
+    --tile:      #191B22;
+    --radius:    12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:      #14161D;
+      --surface:   #1D2029;
+      --ink:       #E8EAF0;
+      --ink-soft:  #A2A9BD;
+      --ink-faint: #6B7286;
+      --grid:      #2C303C;
+      --grid-sub:  #23262F;
+      --axis:      #8891A8;
+      --accent:    #8A97EC;
+      --accent-bg: #2A2E45;
+      --danger:    #E4736B;
+      --line:      #2C303C;
+      --zone:      rgba(226, 205, 120, 0.16);
+      --zone-line: #6E6636;
+      --tile:      #C2C7D2;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    background: var(--page);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 32px 20px 48px;
+    display: flex;
+    justify-content: center;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { width: 100%; max-width: 900px; }
+
+  header { margin-bottom: 22px; }
+  h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.5; }
+
+  .layout { display: flex; gap: 20px; align-items: flex-start; }
+
+  .panel {
+    background: var(--surface);
+    border: 0.5px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 2px rgba(20,25,45,0.04);
+  }
+
+  .board { flex: 0 0 auto; padding: 16px; }
+  canvas { display: block; border-radius: 8px; cursor: crosshair; touch-action: none; }
+  .readout {
+    margin-top: 12px; display: flex; align-items: center; gap: 8px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--ink-soft); min-height: 20px;
+  }
+  .readout .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+  .readout .hint { color: var(--ink-faint); }
+
+  .side { flex: 1 1 210px; min-width: 210px; display: flex; flex-direction: column; gap: 16px; }
+
+  @media (max-width: 920px) {
+    .layout { flex-wrap: wrap; }
+    .board { flex: 1 1 100%; }
+    .board canvas { max-width: 100%; height: auto; }
+    .side { flex-basis: 100%; }
+  }
+
+  /* Display toggles */
+  .controls { padding: 12px 14px; display: flex; flex-direction: column; gap: 11px; }
+  .controls .grp-title { font-size: 13px; font-weight: 500; color: var(--ink-soft); }
+  .toggle { display: flex; align-items: center; gap: 10px; font-size: 13.5px; cursor: pointer; user-select: none; }
+  .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .toggle .track {
+    width: 34px; height: 20px; border-radius: 999px; background: var(--line);
+    position: relative; transition: background 0.15s; flex: 0 0 auto;
+  }
+  .toggle .thumb {
+    position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25); transition: transform 0.15s;
+  }
+  .toggle input:checked + .track { background: var(--accent); }
+  .toggle input:checked + .track .thumb { transform: translateX(14px); }
+  .toggle input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .toolbar { display: flex; gap: 8px; }
+  button {
+    font-family: inherit; font-size: 13.5px; font-weight: 500; color: var(--ink);
+    background: var(--surface); border: 0.5px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; transition: background 0.12s, border-color 0.12s, transform 0.06s;
+  }
+  button:hover:not(:disabled) { background: var(--page); border-color: var(--ink-faint); }
+  button:active:not(:disabled) { transform: scale(0.97); }
+  button:disabled { color: var(--ink-faint); cursor: default; opacity: 0.6; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  button.clear:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+
+  .list-panel { padding: 4px; overflow: hidden; }
+  .list-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px 8px; }
+  .list-head span { font-size: 13px; font-weight: 500; color: var(--ink-soft); }
+  .list-head .count { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--ink-faint); }
+
+  ol { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+  li {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-top: 0.5px solid var(--line); font-family: 'IBM Plex Mono', monospace; font-size: 13.5px;
+  }
+  li .idx { color: var(--ink-faint); width: 20px; flex: 0 0 auto; }
+  li .coord { flex: 1; white-space: nowrap; }
+  li .swatch { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+  li button.del { padding: 3px; border: none; background: none; color: var(--ink-faint); border-radius: 5px; line-height: 0; }
+  li button.del:hover { background: var(--accent-bg); color: var(--danger); }
+  li button.del svg { width: 14px; height: 14px; }
+
+  .empty {
+    padding: 18px 12px; text-align: center; color: var(--ink-faint);
+    font-size: 13px; font-family: 'Space Grotesk', sans-serif; border-top: 0.5px solid var(--line);
+  }
+
+  footer {
+    margin-top: 28px; padding-top: 18px; border-top: 0.5px solid var(--line);
+    font-size: 12.5px; color: var(--ink-faint); line-height: 1.6;
+  }
+  footer p { margin: 0 0 6px; }
+  footer .disclaimer { margin-bottom: 10px; max-width: 62ch; }
+  footer a { color: var(--ink-soft); text-decoration: none; border-bottom: 0.5px solid var(--line); }
+  footer a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  footer .credit strong { font-weight: 600; }
+  footer .flinks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  footer .flinks a { border-bottom: none; }
+  footer .flinks .sep { color: var(--ink-faint); opacity: 0.45; }
+
+  @media (prefers-reduced-motion: reduce) {
+    button, .toggle .track, .toggle .thumb { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Robot Arm Point Planner</h1>
+    <p>Click a grid intersection to drop a point. Both axes run from −75 to 225 and cross at the origin (0, 0), with Y pointing up — enough to fully enclose the 6×6 grid of Vex tiles. The light-yellow circle marks the arm's reach: radius 50 around the origin.</p>
+  </header>
+
+  <div class="layout">
+    <div class="panel board">
+      <canvas id="grid" width="676" height="664" aria-label="Coordinate grid from -75 to 225 on each axis. Click to place points."></canvas>
+      <div class="readout" id="readout">
+        <span class="hint">Hover the grid to preview a position</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel controls">
+        <span class="grp-title">Display</span>
+        <label class="toggle"><input type="checkbox" id="toggleNumbers"><span class="track"><span class="thumb"></span></span><span>Tile numbers</span></label>
+        <label class="toggle"><input type="checkbox" id="toggleConnect"><span class="track"><span class="thumb"></span></span><span>Connect points</span></label>
+      </div>
+
+      <div class="toolbar">
+        <button id="undo" disabled aria-label="Undo last point">
+          <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>
+          Undo
+        </button>
+        <button id="clear" class="clear" disabled aria-label="Clear all points">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M5 7l1 13h12l1-13"/><path d="M9 7V4h6v3"/></svg>
+          Clear
+        </button>
+      </div>
+
+      <div class="panel list-panel">
+        <div class="list-head">
+          <span>Points</span>
+          <span class="count" id="count">0 placed</span>
+        </div>
+        <ol id="list"></ol>
+        <div class="empty" id="empty">No points yet</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p class="credit">Designed by <a href="https://billvanloo.com" target="_blank" rel="noopener"><strong>Bill Van Loo</strong></a></p>
+    <p class="disclaimer">Developed using Claude — please don't use this tool if you're uncomfortable using tools built with AI assistance.</p>
+    <p class="flinks">
+      <a href="mailto:billvanloo.tech+feedback@gmail.com?subject=Robot%20Arm%20Point%20Planner%20-%20bug%20report">Report a bug</a>
+      <span class="sep">·</span>
+      <a href="mailto:billvanloo.tech+feedback@gmail.com?subject=Robot%20Arm%20Point%20Planner%20-%20feature%20request">Request a feature</a>
+      <span class="sep">·</span>
+      <a href="https://ko-fi.com/billvanloo" target="_blank" rel="noopener">Support on Ko-fi</a>
+    </p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('grid');
+  const ctx = canvas.getContext('2d');
+  const listEl = document.getElementById('list');
+  const emptyEl = document.getElementById('empty');
+  const countEl = document.getElementById('count');
+  const readoutEl = document.getElementById('readout');
+  const undoBtn = document.getElementById('undo');
+  const clearBtn = document.getElementById('clear');
+  const numbersToggle = document.getElementById('toggleNumbers');
+  const connectToggle = document.getElementById('toggleConnect');
+
+  // Geometry: a plane spanning MIN..MAX on both axes, rendered at SCALE times size.
+  // STEP = spacing of the visible fine grid; SNAP = placement increment (can be finer).
+  const SCALE = 2;
+  const ML = 52, MT = 24, MIN = -75, MAX = 225, STEP = 10, SNAP = 5;
+  const RANGE = MAX - MIN;               // 300 units
+  const PS = RANGE * SCALE;              // 600 display px
+  const CW = ML + PS + 24, CH = MT + PS + 40;
+  const TILE = 50, TILE_OFF = 25;
+
+  // Tile cell edges: origin-centered 50-unit tiles. With MIN/MAX at ±25 offsets
+  // the plane edges coincide with tile edges -> six full tiles per axis.
+  const cellEdges = [MIN];
+  for (let v = -TILE_OFF; v < MAX; v += TILE) { if (v > MIN) cellEdges.push(v); }
+  cellEdges.push(MAX);
+  const NCELLS = cellEdges.length - 1;   // 6
+
+  // Fine grid / tick labels anchor to real coordinate values, not to MIN.
+  const GRID_START = Math.ceil(MIN / STEP) * STEP;   // -70
+  const LABEL_START = Math.ceil(MIN / 50) * 50;      // -50
+
+  let points = [];
+  let hover = null;
+  let showNumbers = false;
+  let showConnect = false;
+
+  function css(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function toPx(x, y) {
+    return { px: ML + (x - MIN) * SCALE, py: MT + PS - (y - MIN) * SCALE };
+  }
+  function toCoord(px, py) {
+    let x = (px - ML) / SCALE + MIN;
+    let y = ((MT + PS) - py) / SCALE + MIN;
+    if (x < MIN - SNAP / 2 || x > MAX + SNAP / 2 || y < MIN - SNAP / 2 || y > MAX + SNAP / 2) return null;
+    x = Math.min(MAX, Math.max(MIN, Math.round(x / SNAP) * SNAP));
+    y = Math.min(MAX, Math.max(MIN, Math.round(y / SNAP) * SNAP));
+    return { x, y };
+  }
+
+  function setupDPR() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = CW * dpr;
+    canvas.height = CH * dpr;
+    canvas.style.width = CW + 'px';
+    canvas.style.height = CH + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function draw() {
+    const C = {
+      surface: css('--surface'), grid: css('--grid'), sub: css('--grid-sub'),
+      axis: css('--axis'), ink: css('--ink'), soft: css('--ink-soft'),
+      faint: css('--ink-faint'), accent: css('--accent'),
+      zone: css('--zone'), zoneLine: css('--zone-line'), tile: css('--tile')
+    };
+    ctx.clearRect(0, 0, CW, CH);
+
+    // plane background
+    ctx.fillStyle = C.surface;
+    ctx.fillRect(ML - 0.5, MT - 0.5, PS + 1, PS + 1);
+
+    // fine grid lines (anchored to multiples of STEP)
+    ctx.lineWidth = 1;
+    for (let v = GRID_START; v <= MAX; v += STEP) {
+      ctx.strokeStyle = (v % 50 === 0) ? C.grid : C.sub;
+      const gx = ML + (v - MIN) * SCALE + 0.5;
+      const gy = MT + PS - (v - MIN) * SCALE + 0.5;
+      ctx.beginPath(); ctx.moveTo(gx, MT); ctx.lineTo(gx, MT + PS); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ML, gy); ctx.lineTo(ML + PS, gy); ctx.stroke();
+    }
+
+    // reach zone: circle at origin, radius 50
+    const origin = toPx(0, 0);
+    ctx.beginPath();
+    ctx.arc(origin.px, origin.py, 50 * SCALE, 0, Math.PI * 2);
+    ctx.fillStyle = C.zone; ctx.fill();
+    ctx.strokeStyle = C.zoneLine; ctx.lineWidth = 1.25; ctx.stroke();
+
+    // dotted Vex tile outlines at every tile edge (including the enclosing border)
+    ctx.strokeStyle = C.tile;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    for (let i = 0; i < cellEdges.length; i++) {
+      const e = cellEdges[i];
+      const px = toPx(e, 0).px + 0.5;
+      const py = toPx(0, e).py + 0.5;
+      ctx.beginPath(); ctx.moveTo(px, MT); ctx.lineTo(px, MT + PS); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ML, py); ctx.lineTo(ML + PS, py); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // bold x=0 and y=0 axes
+    ctx.strokeStyle = C.axis;
+    ctx.lineWidth = 1.75;
+    ctx.beginPath(); ctx.moveTo(origin.px + 0.5, MT); ctx.lineTo(origin.px + 0.5, MT + PS); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ML, origin.py + 0.5); ctx.lineTo(ML + PS, origin.py + 0.5); ctx.stroke();
+
+    // tile numbers (column-major: bottom->top, then rightward; 1 at bottom-left)
+    if (showNumbers) {
+      ctx.fillStyle = C.faint;
+      ctx.font = "11px 'IBM Plex Mono', monospace";
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let c = 0; c < NCELLS; c++) {
+        for (let r = 0; r < NCELLS; r++) {
+          const cx = (cellEdges[c] + cellEdges[c + 1]) / 2;
+          const cy = (cellEdges[r] + cellEdges[r + 1]) / 2;
+          const p = toPx(cx, cy);
+          ctx.fillText(String(c * NCELLS + r + 1), p.px, p.py);
+        }
+      }
+    }
+
+    // frame tick labels every 50 (anchored to multiples of 50)
+    ctx.fillStyle = C.soft;
+    ctx.font = "12px 'IBM Plex Mono', monospace";
+    for (let v = LABEL_START; v <= MAX; v += 50) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(String(v), toPx(v, 0).px, MT + PS + 7);
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(v), ML - 8, toPx(0, v).py);
+    }
+    ctx.fillStyle = C.faint;
+    ctx.font = "italic 12px 'IBM Plex Mono', monospace";
+    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText('x', ML + PS - 3, origin.py - 4);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('y', origin.px + 5, MT + 2);
+
+    // hover preview
+    if (hover) {
+      const { px, py } = toPx(hover.x, hover.y);
+      ctx.strokeStyle = C.accent; ctx.globalAlpha = 0.35; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(ML, py + 0.5); ctx.lineTo(ML + PS, py + 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px + 0.5, MT); ctx.lineTo(px + 0.5, MT + PS); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(px, py, 5.5, 0, Math.PI * 2);
+      ctx.strokeStyle = C.accent; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+
+    // connecting line through points in placement order
+    if (showConnect && points.length > 1) {
+      ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      points.forEach((pt, i) => {
+        const { px, py } = toPx(pt.x, pt.y);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+    }
+
+    // placed points
+    ctx.font = "12.5px 'IBM Plex Mono', monospace";
+    points.forEach(pt => {
+      const { px, py } = toPx(pt.x, pt.y);
+      ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2);
+      ctx.fillStyle = C.accent; ctx.fill();
+
+      const label = '(' + pt.x + ', ' + pt.y + ')';
+      const w = ctx.measureText(label).width;
+      let lx = px + 10, align = 'left';
+      if (px + 10 + w > ML + PS) { lx = px - 10; align = 'right'; }
+      let ly = py - 10;
+      if (py - 10 < MT + 10) ly = py + 18;
+      ctx.textAlign = align; ctx.textBaseline = 'middle';
+      ctx.fillStyle = C.ink;
+      ctx.fillText(label, lx, ly);
+    });
+  }
+
+  function renderList() {
+    listEl.innerHTML = '';
+    points.forEach((pt, i) => {
+      const li = document.createElement('li');
+      const idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = (i + 1);
+      const sw = document.createElement('span'); sw.className = 'swatch';
+      const coord = document.createElement('span'); coord.className = 'coord';
+      coord.textContent = '(' + pt.x + ', ' + pt.y + ')';
+      const del = document.createElement('button');
+      del.className = 'del'; del.setAttribute('aria-label', 'Remove point ' + (i + 1));
+      del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      del.addEventListener('click', () => { points.splice(i, 1); sync(); });
+      li.append(idx, sw, coord, del);
+      listEl.appendChild(li);
+    });
+    const n = points.length;
+    countEl.textContent = n + ' placed';
+    emptyEl.style.display = n ? 'none' : 'block';
+    undoBtn.disabled = n === 0;
+    clearBtn.disabled = n === 0;
+  }
+
+  function sync() { renderList(); draw(); }
+
+  function eventPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const src = e.touches ? e.touches[0] : e;
+    const sx = CW / rect.width, sy = CH / rect.height;   // handle scaled-down canvas
+    return { px: (src.clientX - rect.left) * sx, py: (src.clientY - rect.top) * sy };
+  }
+
+  canvas.addEventListener('mousemove', e => {
+    const { px, py } = eventPos(e);
+    hover = toCoord(px, py);
+    if (hover) {
+      readoutEl.innerHTML = '';
+      const d = document.createElement('span'); d.className = 'dot';
+      const t = document.createElement('span'); t.textContent = '(' + hover.x + ', ' + hover.y + ')';
+      readoutEl.append(d, t);
+    } else {
+      readoutEl.innerHTML = '<span class="hint">Hover the grid to preview a position</span>';
+    }
+    draw();
+  });
+  canvas.addEventListener('mouseleave', () => {
+    hover = null;
+    readoutEl.innerHTML = '<span class="hint">Hover the grid to preview a position</span>';
+    draw();
+  });
+
+  function place(px, py) {
+    const c = toCoord(px, py);
+    if (!c) return;
+    if (points.some(p => p.x === c.x && p.y === c.y)) return;
+    points.push(c);
+    sync();
+  }
+
+  canvas.addEventListener('click', e => { const { px, py } = eventPos(e); place(px, py); });
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const { px, py } = eventPos(e);
+    hover = toCoord(px, py);
+    place(px, py);
+  }, { passive: false });
+
+  undoBtn.addEventListener('click', () => { points.pop(); sync(); });
+  clearBtn.addEventListener('click', () => { points = []; sync(); });
+  numbersToggle.addEventListener('change', () => { showNumbers = numbersToggle.checked; draw(); });
+  connectToggle.addEventListener('change', () => { showConnect = connectToggle.checked; draw(); });
+
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+  }
+
+  setupDPR();
+  renderList();
+  draw();
+})();
+</script>
+</body>
+</html>
